@@ -21,9 +21,13 @@ let gameState = {
   turn: 0, // 0 for player 1, 1 for player 2
   dice: null,
   diceRolled: false,
+  rollCounter: 0,
   pawns: {}, // "color_index": "start" or 0-56
   winner: null,
+  disconnectedPlayerId: null, // Track who disconnected
 };
+
+let disconnectTimeout = null;
 
 const ALL_COLORS = ['Blue', 'Red', 'Green', 'Yellow'];
 const COLOR_OFFSETS = {
@@ -42,9 +46,12 @@ function resetGame() {
     turn: 0,
     dice: null,
     diceRolled: false,
+    rollCounter: 0,
     pawns: {},
     winner: null,
+    disconnectedPlayerId: null,
   };
+  if (disconnectTimeout) clearTimeout(disconnectTimeout);
 }
 
 function initializePawns(mode, players) {
@@ -93,6 +100,13 @@ io.on('connection', (socket) => {
       gameState.status = 'PLAYING';
       gameState.turn = Math.floor(Math.random() * 2);
       gameState.pawns = initializePawns(gameState.mode, gameState.players);
+      gameState.rollCounter = 0;
+    }
+
+    if (disconnectTimeout) {
+      clearTimeout(disconnectTimeout);
+      disconnectTimeout = null;
+      gameState.disconnectedPlayerId = null;
     }
 
     io.emit('state_update', gameState);
@@ -107,6 +121,7 @@ io.on('connection', (socket) => {
     const diceValue = Math.floor(Math.random() * 6) + 1;
     gameState.dice = diceValue;
     gameState.diceRolled = true;
+    gameState.rollCounter += 1;
 
     // Check if player has any valid moves. If no valid moves, switch turn.
     const hasValidMove = checkValidMoves(gameState.players[playerIndex], diceValue);
@@ -130,7 +145,7 @@ io.on('connection', (socket) => {
       for (let i = 0; i < 4; i++) {
         let pos = gameState.pawns[`${c}_${i}`];
         if (pos === 'start' && dice === 6) return true;
-        if (pos !== 'start' && pos + dice <= 57) return true;
+        if (pos !== 'start' && pos + dice <= 56) return true;
       }
     }
     return false;
@@ -144,7 +159,7 @@ io.on('connection', (socket) => {
           let allHome = true;
           for (let c of p.colors) {
               for (let pawnIdx = 0; pawnIdx < 4; pawnIdx++) {
-                  if (gameState.pawns[`${c}_${pawnIdx}`] !== 57) {
+                  if (gameState.pawns[`${c}_${pawnIdx}`] !== 56) {
                       allHome = false;
                   }
               }
@@ -173,7 +188,7 @@ io.on('connection', (socket) => {
     if (pos === 'start' && dice === 6) {
         newPos = 0;
         validMove = true;
-    } else if (pos !== 'start' && pos + dice <= 57) {
+    } else if (pos !== 'start' && pos + dice <= 56) {
         newPos = pos + dice;
         validMove = true;
     }
@@ -230,8 +245,19 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
     const index = gameState.players.findIndex(p => p.id === socket.id);
-    if (index !== -1) {
-        // One player disconnected, end game for everyone
+    if (index !== -1 && gameState.status === 'PLAYING') {
+        gameState.disconnectedPlayerId = socket.id;
+        io.emit('state_update', gameState);
+
+        // Allow 60 seconds grace period to reconnect
+        if (!disconnectTimeout) {
+             disconnectTimeout = setTimeout(() => {
+                 resetGame();
+                 io.emit('state_update', gameState);
+                 disconnectTimeout = null;
+             }, 60000);
+        }
+    } else if (index !== -1) {
         resetGame();
         io.emit('state_update', gameState);
     }

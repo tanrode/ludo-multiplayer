@@ -41,7 +41,7 @@ export default function Lobby({ gameState, socket }: Props) {
     }
   };
 
-  const availableColors = isFirstPlayer ? ALL_COLORS : ALL_COLORS.filter(c => !gameState.players[0].colors.includes(c));
+  const availableColors = isFirstPlayer ? ALL_COLORS : ALL_COLORS.filter(c => !gameState.players[0]?.colors.includes(c));
 
   return (
     <motion.div 
@@ -97,7 +97,7 @@ export default function Lobby({ gameState, socket }: Props) {
                 Choose your Color(s) {mode === '2-color' ? '(Pick 1)' : '(Pick 2)'}
               </label>
               <div className="flex gap-4 justify-center">
-                {['Blue', 'Red', 'Green', 'Yellow'].map(color => {
+                {availableColors.map(color => {
                   const isSelected = selectedColors.includes(color);
                   const isFull = (mode === '2-color' && selectedColors.length >= 1) || (mode === '4-color' && selectedColors.length >= 2);
                   const disabled = !isSelected && isFull;

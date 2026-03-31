@@ -11,6 +11,8 @@ export interface GameState {
   turn: number;
   dice: number | null;
   diceRolled: boolean;
+  rollCounter: number;
   pawns: Record<string, 'start' | number>;
   winner: string | null;
+  disconnectedPlayerId: string | null;
 }

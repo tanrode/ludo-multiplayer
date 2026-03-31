@@ -5,7 +5,7 @@ import Game from './Game';
 import type { GameState } from './types';
 
 // Connect to the backend server
-const socket: Socket = io(import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001');
+const socket: Socket = io('https://ludo-multiplayer-backend-pi0s.onrender.com');
 
 function App() {
   const [gameState, setGameState] = useState<GameState | null>(null);

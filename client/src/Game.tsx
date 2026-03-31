@@ -11,27 +11,29 @@ interface Props {
 }
 
 export default function Game({ gameState, socket }: Props) {
-  const [isRolling, setIsRolling] = useState(false);
+  const [isDiceAnimating, setIsDiceAnimating] = useState(false);
+  const [lastDiceHash, setLastDiceHash] = useState('');
   const playerId = socket.id;
   const isMyTurn = gameState.players[gameState.turn]?.id === playerId;
 
   useEffect(() => {
-    if (gameState.diceRolled) {
-      // If backend says dice is rolled, stop rolling animation after a short delay
-      setTimeout(() => setIsRolling(false), 800);
-    } else {
-      setIsRolling(false);
+    // Unique key to detect a NEW roll even if the number is the same (turn + dice + rollCounter)
+    const diceHash = `${gameState.turn}_${gameState.dice}_${gameState.diceRolled}_${gameState.rollCounter}`;
+    
+    if (gameState.diceRolled && gameState.dice !== null && diceHash !== lastDiceHash) {
+      setLastDiceHash(diceHash);
+      setIsDiceAnimating(true);
+      setTimeout(() => setIsDiceAnimating(false), 800);
     }
-  }, [gameState.diceRolled]);
+  }, [gameState.diceRolled, gameState.dice, gameState.turn, lastDiceHash]);
 
   const handleRollDice = () => {
     if (!isMyTurn || gameState.diceRolled) return;
-    setIsRolling(true);
     socket.emit('roll_dice');
   };
 
   const handlePawnClick = (color: string, index: number) => {
-    if (!isMyTurn || !gameState.diceRolled || isRolling) return;
+    if (!isMyTurn || !gameState.diceRolled || isDiceAnimating) return;
     socket.emit('move_pawn', { color, index });
   };
 
@@ -62,7 +64,7 @@ export default function Game({ gameState, socket }: Props) {
             diceValue={gameState.dice} 
             onRoll={handleRollDice} 
             disabled={!isMyTurn || gameState.diceRolled} 
-            isRolling={isRolling && isMyTurn} 
+            isRolling={isDiceAnimating} 
           />
           <button 
             onClick={() => socket.emit('exit_game')}
@@ -107,6 +109,36 @@ export default function Game({ gameState, socket }: Props) {
               >
                 Return to Lobby
               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* DISCONNECTED MODAL */}
+      <AnimatePresence>
+        {gameState.status === 'PLAYING' && gameState.disconnectedPlayerId && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.8, y: 50 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.8, y: 50 }}
+              className="glass-panel p-12 rounded-3xl text-center max-w-lg w-full"
+            >
+              <h1 className="text-4xl font-black mb-4 text-transparent bg-clip-text bg-gradient-to-r from-red-400 to-red-600">
+                Player Disconnected
+              </h1>
+              <p className="text-xl text-white mb-4">
+                Waiting for the player to reconnect...
+              </p>
+              <div className="flex justify-center mt-6">
+                 <div className="w-12 h-12 border-4 border-red-500 border-t-transparent rounded-full animate-spin"></div>
+              </div>
+              <p className="text-sm text-slate-400 mt-6">Game will reset in 60 seconds if they don't return.</p>
             </motion.div>
           </motion.div>
         )}

@@ -1,5 +1,6 @@
 import type { GameState } from '../types';
 import { motion } from 'framer-motion';
+import { useRef, useEffect, useState } from 'react';
 
 interface Props {
   gameState: GameState;
@@ -70,6 +71,22 @@ const startBase: Record<string, {c: number, r: number}[]> = {
 
 export default function Board({ gameState, onPawnClick, me }: Props) {
   const isMyTurn = gameState.players[gameState.turn]?.id === me;
+  const prevPawnsRef = useRef<Record<string, number | 'start'>>({});
+  const [movingPawn, setMovingPawn] = useState<string | null>(null);
+
+  useEffect(() => {
+    // Detect which pawn moved
+    const currentPawns = gameState.pawns;
+    const movedKey = Object.keys(currentPawns).find(key => currentPawns[key] !== prevPawnsRef.current[key]);
+    
+    if (movedKey) {
+        setMovingPawn(movedKey);
+        // Clear moving state after animation
+        const timer = setTimeout(() => setMovingPawn(null), 2000); // Allow time for animation
+        return () => clearTimeout(timer);
+    }
+    prevPawnsRef.current = { ...currentPawns };
+  }, [gameState.pawns]);
 
   const getPawnPos = (color: string, index: number, posId: number | 'start') => {
     let result = { c: 0, r: 0 };
@@ -85,18 +102,52 @@ export default function Board({ gameState, onPawnClick, me }: Props) {
     return result;
   };
 
-  const getPawnsGroupedByTile = () => {
-    const tileMap: Record<string, { id: string; color: string; index: number; pos: {c:number, r:number} }[]> = {};
-    
-    Object.keys(gameState.pawns).forEach(key => {
+  const getPawnPath = (color: string, index: number, from: number | 'start', to: number | 'start') => {
+      const path: {c: number, r: number}[] = [];
+      
+      if (from === 'start') {
+          if (to === 0) {
+              path.push(startBase[color][index]);
+              path.push(getPawnPos(color, index, 0));
+          } else {
+              path.push(startBase[color][index]);
+          }
+      } else if (to === 'start') {
+          // Quick jump back to start
+          path.push(getPawnPos(color, index, from));
+          path.push(startBase[color][index]);
+      } else if (typeof from === 'number' && typeof to === 'number') {
+          for (let i = from; i <= to; i++) {
+              path.push(getPawnPos(color, index, i));
+          }
+      } else {
+          path.push(getPawnPos(color, index, to));
+      }
+      return path;
+  };
+
+  const getPawnsWithPaths = () => {
+    return Object.keys(gameState.pawns).map(key => {
       const [color, i] = key.split('_');
       const index = parseInt(i, 10);
       const posId = gameState.pawns[key];
       const pos = getPawnPos(color, index, posId);
       
-      const posKey = `${pos.c}_${pos.r}`;
+      // For simplicity, we'll just animate to the current position if we don't have a specific "move" event
+      // But we can check if the current dice was used to move this pawn.
+      // However, framer-motion keyframes when 'pos' changes will handle the "step" if we provide the intermediate coords.
+      
+      return { id: key, color, index, pos, posId };
+    });
+  };
+
+  const getPawnsGroupedByTile = () => {
+    const tileMap: Record<string, { id: string; color: string; index: number; pos: {c:number, r:number}, posId: number | 'start' }[]> = {};
+    
+    getPawnsWithPaths().forEach(p => {
+      const posKey = `${p.pos.c}_${p.pos.r}`;
       if (!tileMap[posKey]) tileMap[posKey] = [];
-      tileMap[posKey].push({ id: key, color, index, pos });
+      tileMap[posKey].push(p);
     });
     return tileMap;
   };
@@ -127,7 +178,6 @@ export default function Board({ gameState, onPawnClick, me }: Props) {
 
           // Center
           if (col >= 6 && col <= 8 && row >= 6 && row <= 8) {
-             const v = ['Red','Green','Yellow','Blue'];
              bg = 'bg-gradient-to-br from-red-500 via-yellow-500 to-blue-500';
           }
 
@@ -159,34 +209,43 @@ export default function Board({ gameState, onPawnClick, me }: Props) {
 
       {/* Dynamic Overlay for pawns using absolute position matching grid percentage */}
       <div className="absolute inset-0 w-full h-full pointer-events-none">
-        {Object.entries(getPawnsGroupedByTile()).map(([tileKey, group]) => {
-          return group.map((p, idx) => {
-            const left = `${(p.pos.c * 100) / 15}%`;
-            const top = `${(p.pos.r * 100) / 15}%`;
-            
+        {getPawnsWithPaths().map((p) => {
+            const group = Object.values(getPawnsGroupedByTile()).find(g => g.some(item => item.id === p.id)) || [p];
+            const idxInGroup = group.findIndex(item => item.id === p.id);
+
             // Offset slightly if multiple pawns are on the exact same tile
             const offsetDist = group.length > 1 ? 12 : 0;
-            const angle = (idx * (360 / group.length)) * (Math.PI / 180);
+            const angle = (idxInGroup * (360 / group.length)) * (Math.PI / 180);
             const offsetX = Math.cos(angle) * offsetDist;
             const offsetY = Math.sin(angle) * offsetDist;
 
             const isMyPawn = myColors.includes(p.color);
             const canMove = isMyPawn && isMyTurn && gameState.diceRolled;
 
+            // Step-by-step keyframes
+            const prevPosId = prevPawnsRef.current[p.id] || p.posId;
+            const path = (movingPawn === p.id) ? getPawnPath(p.color, p.index, prevPosId, p.posId) : [p.pos];
+            
+            const lefts = path.map(pt => `${(pt.c * 100) / 15}%`);
+            const tops = path.map(pt => `${(pt.r * 100) / 15}%`);
+
             return (
               <motion.div
                 key={p.id}
                 initial={false}
                 animate={{
-                  left,
-                  top,
+                  left: lefts,
+                  top: tops,
                   x: offsetX,
                   y: offsetY,
-                  scale: canMove ? [1, 1.15, 1] : 1, // Pulse animation for valid selection
+                  scale: canMove ? [1, 1.15, 1] : 1,
                 }}
                 transition={{
                   scale: { repeat: canMove ? Infinity : 0, duration: 1.5, ease: 'easeInOut' },
-                  default: { type: 'spring', stiffness: 80, damping: 15 } // Hop spring
+                  left: { duration: path.length * 0.4, ease: "linear" },
+                  top: { duration: path.length * 0.4, ease: "linear" },
+                  x: { duration: 0.2 },
+                  y: { duration: 0.2 }
                 }}
                 className={`absolute w-[6.66%] h-[6.66%] flex items-center justify-center pawn-shadow ${canMove ? 'pointer-events-auto cursor-pointer z-20' : 'pointer-events-none z-10'}`}
                 style={{
@@ -195,19 +254,26 @@ export default function Board({ gameState, onPawnClick, me }: Props) {
                 onClick={() => canMove && onPawnClick(p.color, p.index)}
               >
                 {/* 3D Pawn Shape using CSS */}
-                <div 
-                  className="relative w-[30px] h-[36px] mt-[-10px] rounded-t-full shadow-[inset_-2px_-6px_6px_rgba(0,0,0,0.4),0_8px_6px_rgba(0,0,0,0.5)] border border-white/40 transition-transform duration-200"
+                <motion.div 
+                  animate={movingPawn === p.id ? {
+                     y: path.map((_, i) => i % 2 === 0 ? 0 : -15),
+                     scale: path.map((_, i) => i % 2 === 0 ? 1 : 1.1),
+                  } : { y: 0, scale: 1 }}
+                  transition={{
+                     duration: path.length * 0.4,
+                     ease: "linear"
+                  }}
+                  className="relative w-[30px] h-[36px] mt-[-10px] rounded-t-full shadow-[inset_-2px_-6px_6px_rgba(0,0,0,0.4),0_8px_6px_rgba(0,0,0,0.5)] border border-white/40 shadow-xl"
                   style={{
                     backgroundColor: colorStyles[p.color],
                   }}
                 >
                   <div className="absolute top-[2px] right-[4px] w-[8px] h-[8px] bg-white/40 rounded-full blur-[2px]" />
                   <div className="absolute bottom-[-4px] left-[-4px] right-[-4px] h-[8px] rounded-full" style={{ backgroundColor: colorStyles[p.color], filter: 'brightness(0.6)' }}/>
-                </div>
+                </motion.div>
               </motion.div>
             );
-          });
-        })}
+          })}
       </div>
     </div>
   );
